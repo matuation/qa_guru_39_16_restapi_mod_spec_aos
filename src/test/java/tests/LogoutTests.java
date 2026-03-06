@@ -128,6 +128,4 @@ public class LogoutTests extends TestBase {
         assertThat(actualRefreshError).isEqualTo(expectedRefreshError);
 
     }
-
-    // todo add more negative tests
 }
