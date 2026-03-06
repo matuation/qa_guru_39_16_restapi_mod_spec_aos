@@ -1,0 +1,815 @@
+package tests;
+
+import models.login.LoginBodyModel;
+import models.login.SuccessfulLoginResponseModel;
+import models.registration.RegistrationBodyModel;
+import models.registration.SuccessfulRegistrationResponseModel;
+import models.update.*;
+import net.datafaker.Faker;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+
+import static io.restassured.RestAssured.given;
+import static org.assertj.core.api.Assertions.assertThat;
+import static specs.login.LoginSpec.loginRequestSpec;
+import static specs.login.LoginSpec.successfulLoginResponseSpec;
+import static specs.registration.RegistrationSpec.SuccessfulRegistrationResponseSpec;
+import static specs.update.UpdateUserSpec.*;
+
+public class UpdateUserTests extends TestBase {
+
+    String username;
+    String password;
+    String forbiddenUsername;
+    String forbiddenExceededUsername;
+    String exceededLengthUsername;
+    String forbiddenExceededEmail;
+    String firstName;
+    String lastName;
+    String email;
+    String forbiddenEmail;
+    String emptyUsername = "";
+    String emptyFirstName = "";
+    String emptyLastName = "";
+    String emptyEmail = "";
+    String syntaxer = "\"";
+
+
+    @BeforeEach
+    public void prepareTestData() {
+        Faker faker = new Faker();
+        username = faker.name().firstName();
+        password = faker.name().firstName();
+        firstName = faker.name().firstName();
+        lastName = faker.name().lastName();
+        email = faker.internet().emailAddress();
+        forbiddenUsername = faker.regexify("[\\!=]{5}");
+        forbiddenExceededUsername = faker.regexify("[\\!.=]{151}");
+        exceededLengthUsername = faker.regexify("[\\w.@+-]{151}");
+        forbiddenExceededEmail = faker.regexify("[\\w.@+-]{255}");
+        forbiddenEmail = faker.regexify("[\\!.=+-]{5}");
+
+    }
+
+    @Test
+    @DisplayName("Успешная замена данных методом PUT")
+    public void successfulUpdatePutTest() {
+        RegistrationBodyModel registrationData = new RegistrationBodyModel(username, password);
+
+        SuccessfulRegistrationResponseModel registrationResponse = given(loginRequestSpec)
+                .body(registrationData)
+                .when()
+                .post("/users/register/")
+                .then()
+                .spec(SuccessfulRegistrationResponseSpec)
+                .extract()
+                .as(SuccessfulRegistrationResponseModel.class);
+
+        int userId = registrationResponse.id();
+        String remoteAddress = registrationResponse.remoteAddr();
+
+        LoginBodyModel loginData = new LoginBodyModel(username, password);
+
+        SuccessfulLoginResponseModel loginResponse = given(loginRequestSpec)
+                .body(loginData)
+                .when()
+                .post("/auth/token/")
+                .then()
+                .spec(successfulLoginResponseSpec)
+                .extract().as(SuccessfulLoginResponseModel.class);
+
+        String accessToken = "Bearer " + loginResponse.access();
+
+        PutUpdateBodyModel putUpdateBody = new PutUpdateBodyModel(username, firstName, lastName, email);
+
+        SuccessfulPutUpdateResponseModel putUpdateResponse = given(loginRequestSpec)
+                .body(putUpdateBody)
+                .header("Authorization", accessToken)
+                .when()
+                .put("/users/me/")
+                .then()
+                .spec(successfulPutUserUpdateSpec)
+                .extract().as(SuccessfulPutUpdateResponseModel.class);
+
+        int actualId = putUpdateResponse.id();
+        String actualUsername = putUpdateResponse.username();
+        String actualFirstName = putUpdateResponse.firstName();
+        String actualLastName = putUpdateResponse.lastName();
+        String actualEmail = putUpdateResponse.email();
+        String actualAddr = putUpdateResponse.remoteAddr();
+
+        assertThat(actualId).isEqualTo(userId);
+        assertThat(actualUsername).isEqualTo(username);
+        assertThat(actualFirstName).isEqualTo(firstName);
+        assertThat(actualLastName).isEqualTo(lastName);
+        assertThat(actualEmail).isEqualTo(email);
+        assertThat(actualAddr).isEqualTo(remoteAddress);
+
+    }
+
+    @Test
+    @DisplayName("Неуспешная замена данных методом PUT - превышен лимит и некорректный Username")
+    public void wrongExceedUpdatePutTest() {
+        RegistrationBodyModel registrationData = new RegistrationBodyModel(username, password);
+
+        SuccessfulRegistrationResponseModel registrationResponse = given(loginRequestSpec)
+                .body(registrationData)
+                .when()
+                .post("/users/register/")
+                .then()
+                .spec(SuccessfulRegistrationResponseSpec)
+                .extract()
+                .as(SuccessfulRegistrationResponseModel.class);
+
+        LoginBodyModel loginData = new LoginBodyModel(username, password);
+
+        SuccessfulLoginResponseModel loginResponse = given(loginRequestSpec)
+                .body(loginData)
+                .when()
+                .post("/auth/token/")
+                .then()
+                .spec(successfulLoginResponseSpec)
+                .extract().as(SuccessfulLoginResponseModel.class);
+
+        String accessToken = "Bearer " + loginResponse.access();
+
+        PutUpdateBodyModel putUpdateBody = new PutUpdateBodyModel(forbiddenUsername, exceededLengthUsername,
+                exceededLengthUsername, forbiddenExceededEmail);
+
+        WrongOrNoFieldsPutUpdateResponseModel putUpdateResponse = given(loginRequestSpec)
+                .body(putUpdateBody)
+                .header("Authorization", accessToken)
+                .when()
+                .put("/users/me/")
+                .then()
+                .spec(wrongOrNoFieldsPutUserUpdateSpec)
+                .extract().as(WrongOrNoFieldsPutUpdateResponseModel.class);
+
+        String actualUsernameError = putUpdateResponse.username().get(0);
+        String actualFirstNameError = putUpdateResponse.firstName().get(0);
+        String actualLastNameError = putUpdateResponse.lastName().get(0);
+        String actualAmountEmailError = putUpdateResponse.email().get(0);
+        String actualFormatEmailError = putUpdateResponse.email().get(1);
+        String expectedUsernameError = "Enter a valid username. This value may contain only letters, numbers, and @/./+/-/_ characters.";
+        String expectedFirstNameError = "Ensure this field has no more than 150 characters.";
+        String expectedLastNameError = "Ensure this field has no more than 150 characters.";
+        String expectedAmountEmailError = "Ensure this field has no more than 254 characters.";
+        String expectedFormatEmailError = "Enter a valid email address.";
+
+        assertThat(actualUsernameError).isEqualTo(expectedUsernameError);
+        assertThat(actualFirstNameError).isEqualTo(expectedFirstNameError);
+        assertThat(actualLastNameError).isEqualTo(expectedLastNameError);
+        assertThat(actualAmountEmailError).isEqualTo(expectedAmountEmailError);
+        assertThat(actualFormatEmailError).isEqualTo(expectedFormatEmailError);
+
+    }
+
+    @Test
+    @DisplayName("Неуспешная замена данных методом PUT - превышен лимит и некорректный Email")
+    public void wrongEmailFormatUpdatePutTest() {
+        RegistrationBodyModel registrationData = new RegistrationBodyModel(username, password);
+
+        SuccessfulRegistrationResponseModel registrationResponse = given(loginRequestSpec)
+                .body(registrationData)
+                .when()
+                .post("/users/register/")
+                .then()
+                .spec(SuccessfulRegistrationResponseSpec)
+                .extract()
+                .as(SuccessfulRegistrationResponseModel.class);
+
+        LoginBodyModel loginData = new LoginBodyModel(username, password);
+
+        SuccessfulLoginResponseModel loginResponse = given(loginRequestSpec)
+                .body(loginData)
+                .when()
+                .post("/auth/token/")
+                .then()
+                .spec(successfulLoginResponseSpec)
+                .extract().as(SuccessfulLoginResponseModel.class);
+
+        String accessToken = "Bearer " + loginResponse.access();
+
+        PutUpdateBodyModel putUpdateBody = new PutUpdateBodyModel(forbiddenUsername, exceededLengthUsername,
+                exceededLengthUsername, forbiddenEmail);
+
+        WrongOrNoFieldsPutUpdateResponseModel putUpdateResponse = given(loginRequestSpec)
+                .body(putUpdateBody)
+                .header("Authorization", accessToken)
+                .when()
+                .put("/users/me/")
+                .then()
+                .spec(wrongOrNoFieldsPutUserUpdateSpec)
+                .extract().as(WrongOrNoFieldsPutUpdateResponseModel.class);
+
+        String actualUsernameError = putUpdateResponse.username().get(0);
+        String actualFirstNameError = putUpdateResponse.firstName().get(0);
+        String actualLastNameError = putUpdateResponse.lastName().get(0);
+        String actualFormatEmailError = putUpdateResponse.email().get(0);
+        String expectedUsernameError = "Enter a valid username. This value may contain only letters, numbers, and @/./+/-/_ characters.";
+        String expectedFirstNameError = "Ensure this field has no more than 150 characters.";
+        String expectedLastNameError = "Ensure this field has no more than 150 characters.";
+        String expectedFormatEmailError = "Enter a valid email address.";
+
+        assertThat(actualUsernameError).isEqualTo(expectedUsernameError);
+        assertThat(actualFirstNameError).isEqualTo(expectedFirstNameError);
+        assertThat(actualLastNameError).isEqualTo(expectedLastNameError);
+        assertThat(actualFormatEmailError).isEqualTo(expectedFormatEmailError);
+
+    }
+
+    @Test
+    @DisplayName("Неуспешная замена данных методом PUT - поля не переданы в тело")
+    public void noFieldsProvidedUpdatePutTest() {
+        RegistrationBodyModel registrationData = new RegistrationBodyModel(username, password);
+
+        SuccessfulRegistrationResponseModel registrationResponse = given(loginRequestSpec)
+                .body(registrationData)
+                .when()
+                .post("/users/register/")
+                .then()
+                .spec(SuccessfulRegistrationResponseSpec)
+                .extract()
+                .as(SuccessfulRegistrationResponseModel.class);
+
+        LoginBodyModel loginData = new LoginBodyModel(username, password);
+
+        SuccessfulLoginResponseModel loginResponse = given(loginRequestSpec)
+                .body(loginData)
+                .when()
+                .post("/auth/token/")
+                .then()
+                .spec(successfulLoginResponseSpec)
+                .extract().as(SuccessfulLoginResponseModel.class);
+
+        String accessToken = "Bearer " + loginResponse.access();
+
+        EmptyPutUpdateBodyModel putUpdateBody = new EmptyPutUpdateBodyModel();
+
+        WrongOrNoFieldsPutUpdateResponseModel putUpdateResponse = given(loginRequestSpec)
+                .body(putUpdateBody)
+                .header("Authorization", accessToken)
+                .when()
+                .put("/users/me/")
+                .then()
+                .spec(wrongOrNoFieldsPutUserUpdateSpec)
+                .extract().as(WrongOrNoFieldsPutUpdateResponseModel.class);
+
+        String actualUsernameError = putUpdateResponse.username().get(0);
+        String actualFirstNameError = putUpdateResponse.firstName().get(0);
+        String actualLastNameError = putUpdateResponse.lastName().get(0);
+        String actualFormatEmailError = putUpdateResponse.email().get(0);
+        String expectedUsernameError = "This field is required.";
+        String expectedFirstNameError = "This field is required.";
+        String expectedLastNameError = "This field is required.";
+        String expectedFormatEmailError = "This field is required.";
+
+        assertThat(actualUsernameError).isEqualTo(expectedUsernameError);
+        assertThat(actualFirstNameError).isEqualTo(expectedFirstNameError);
+        assertThat(actualLastNameError).isEqualTo(expectedLastNameError);
+        assertThat(actualFormatEmailError).isEqualTo(expectedFormatEmailError);
+
+    }
+
+    @Test
+    @DisplayName("Неуспешная замена данных методом PUT - пустые поля")
+    public void emptyFieldsProvidedUpdatePutTest() {
+        RegistrationBodyModel registrationData = new RegistrationBodyModel(username, password);
+
+        SuccessfulRegistrationResponseModel registrationResponse = given(loginRequestSpec)
+                .body(registrationData)
+                .when()
+                .post("/users/register/")
+                .then()
+                .spec(SuccessfulRegistrationResponseSpec)
+                .extract()
+                .as(SuccessfulRegistrationResponseModel.class);
+
+        LoginBodyModel loginData = new LoginBodyModel(username, password);
+
+        SuccessfulLoginResponseModel loginResponse = given(loginRequestSpec)
+                .body(loginData)
+                .when()
+                .post("/auth/token/")
+                .then()
+                .spec(successfulLoginResponseSpec)
+                .extract().as(SuccessfulLoginResponseModel.class);
+
+        String accessToken = "Bearer " + loginResponse.access();
+
+        PutUpdateBodyModel putUpdateBody = new PutUpdateBodyModel(emptyUsername, emptyFirstName,
+                emptyLastName, emptyEmail);
+
+        WrongOrNoFieldsPutUpdateResponseModel putUpdateResponse = given(loginRequestSpec)
+                .body(putUpdateBody)
+                .header("Authorization", accessToken)
+                .when()
+                .put("/users/me/")
+                .then()
+                .spec(emptyFieldsPutUserUpdateSpec)
+                .extract().as(WrongOrNoFieldsPutUpdateResponseModel.class);
+
+        String actualUsernameError = putUpdateResponse.username().get(0);
+
+        String expectedUsernameError = "This field may not be blank.";
+
+        assertThat(actualUsernameError).isEqualTo(expectedUsernameError);
+
+
+    }
+
+    @Test
+    @DisplayName("Неуспешная замена данных методом PUT - передан только Username")
+    public void onlyUsernameUpdatePutTest() {
+        RegistrationBodyModel registrationData = new RegistrationBodyModel(username, password);
+
+        SuccessfulRegistrationResponseModel registrationResponse = given(loginRequestSpec)
+                .body(registrationData)
+                .when()
+                .post("/users/register/")
+                .then()
+                .spec(SuccessfulRegistrationResponseSpec)
+                .extract()
+                .as(SuccessfulRegistrationResponseModel.class);
+
+        LoginBodyModel loginData = new LoginBodyModel(username, password);
+
+        SuccessfulLoginResponseModel loginResponse = given(loginRequestSpec)
+                .body(loginData)
+                .when()
+                .post("/auth/token/")
+                .then()
+                .spec(successfulLoginResponseSpec)
+                .extract().as(SuccessfulLoginResponseModel.class);
+
+        String accessToken = "Bearer " + loginResponse.access();
+
+        OnlyUsernamePutUpdateBodyModel putUpdateBody = new OnlyUsernamePutUpdateBodyModel(username);
+
+        WrongOrNoFieldsPutUpdateResponseModel putUpdateResponse = given(loginRequestSpec)
+                .body(putUpdateBody)
+                .header("Authorization", accessToken)
+                .when()
+                .put("/users/me/")
+                .then()
+                .spec(onlyUsernamePutUserUpdateSpec)
+                .extract().as(WrongOrNoFieldsPutUpdateResponseModel.class);
+
+        String actualFirstNameError = putUpdateResponse.firstName().get(0);
+        String actualLastNameError = putUpdateResponse.lastName().get(0);
+        String actualFormatEmailError = putUpdateResponse.email().get(0);
+        String expectedFirstNameError = "This field is required.";
+        String expectedLastNameError = "This field is required.";
+        String expectedFormatEmailError = "This field is required.";
+
+        assertThat(actualFirstNameError).isEqualTo(expectedFirstNameError);
+        assertThat(actualLastNameError).isEqualTo(expectedLastNameError);
+        assertThat(actualFormatEmailError).isEqualTo(expectedFormatEmailError);
+
+    }
+
+    @Test
+    @DisplayName("Успешная замена всех данных методом PATCH")
+    public void successfulAllFieldsUpdatePatchTest() {
+        RegistrationBodyModel registrationData = new RegistrationBodyModel(username, password);
+
+        SuccessfulRegistrationResponseModel registrationResponse = given(loginRequestSpec)
+                .body(registrationData)
+                .when()
+                .post("/users/register/")
+                .then()
+                .spec(SuccessfulRegistrationResponseSpec)
+                .extract()
+                .as(SuccessfulRegistrationResponseModel.class);
+
+        int userId = registrationResponse.id();
+        String remoteAddress = registrationResponse.remoteAddr();
+
+        LoginBodyModel loginData = new LoginBodyModel(username, password);
+
+        SuccessfulLoginResponseModel loginResponse = given(loginRequestSpec)
+                .body(loginData)
+                .when()
+                .post("/auth/token/")
+                .then()
+                .spec(successfulLoginResponseSpec)
+                .extract().as(SuccessfulLoginResponseModel.class);
+
+        String accessToken = "Bearer " + loginResponse.access();
+
+        PatchUpdateBodyModel patchUpdateBody = new PatchUpdateBodyModel(username, firstName, lastName, email);
+
+        SuccessfulPatchUpdateResponseModel patchUpdateResponse = given(loginRequestSpec)
+                .body(patchUpdateBody)
+                .header("Authorization", accessToken)
+                .when()
+                .patch("/users/me/")
+                .then()
+                .spec(successfulPatchUserUpdateSpec)
+                .extract().as(SuccessfulPatchUpdateResponseModel.class);
+
+        int actualId = patchUpdateResponse.id();
+        String actualUsername = patchUpdateResponse.username();
+        String actualFirstName = patchUpdateResponse.firstName();
+        String actualLastName = patchUpdateResponse.lastName();
+        String actualEmail = patchUpdateResponse.email();
+        String actualAddr = patchUpdateResponse.remoteAddr();
+
+        assertThat(actualId).isEqualTo(userId);
+        assertThat(actualUsername).isEqualTo(username);
+        assertThat(actualFirstName).isEqualTo(firstName);
+        assertThat(actualLastName).isEqualTo(lastName);
+        assertThat(actualEmail).isEqualTo(email);
+        assertThat(actualAddr).isEqualTo(remoteAddress);
+
+    }
+
+    @Test
+    @DisplayName("Успешная замена только Username методом PATCH")
+    public void onlyUsernameUpdatePatchTest() {
+        RegistrationBodyModel registrationData = new RegistrationBodyModel(username, password);
+
+        SuccessfulRegistrationResponseModel registrationResponse = given(loginRequestSpec)
+                .body(registrationData)
+                .when()
+                .post("/users/register/")
+                .then()
+                .spec(SuccessfulRegistrationResponseSpec)
+                .extract()
+                .as(SuccessfulRegistrationResponseModel.class);
+
+        int userId = registrationResponse.id();
+        String remoteAddress = registrationResponse.remoteAddr();
+
+        LoginBodyModel loginData = new LoginBodyModel(username, password);
+
+        SuccessfulLoginResponseModel loginResponse = given(loginRequestSpec)
+                .body(loginData)
+                .when()
+                .post("/auth/token/")
+                .then()
+                .spec(successfulLoginResponseSpec)
+                .extract().as(SuccessfulLoginResponseModel.class);
+
+        String accessToken = "Bearer " + loginResponse.access();
+
+        OnlyUsernamePatchUpdateBodyModel patchUpdateBody = new OnlyUsernamePatchUpdateBodyModel(username);
+
+        SuccessfulPatchUpdateResponseModel patchUpdateResponse = given(loginRequestSpec)
+                .body(patchUpdateBody)
+                .header("Authorization", accessToken)
+                .when()
+                .patch("/users/me/")
+                .then()
+                .spec(successfulOneFieldPatchUserUpdateSpec)
+                .extract().as(SuccessfulPatchUpdateResponseModel.class);
+
+        int actualId = patchUpdateResponse.id();
+        String actualUsername = patchUpdateResponse.username();
+        String actualFirstName = patchUpdateResponse.firstName();
+        String actualLastName = patchUpdateResponse.lastName();
+        String actualEmail = patchUpdateResponse.email();
+        String actualAddr = patchUpdateResponse.remoteAddr();
+
+        assertThat(actualId).isEqualTo(userId);
+        assertThat(actualUsername).isEqualTo(username);
+        assertThat(actualFirstName).isEqualTo("");
+        assertThat(actualLastName).isEqualTo("");
+        assertThat(actualEmail).isEqualTo("");
+        assertThat(actualAddr).isEqualTo(remoteAddress);
+
+    }
+
+    @Test
+    @DisplayName("Успешная замена только FirstName методом PATCH")
+    public void onlyFirstNameUpdatePatchTest() {
+        RegistrationBodyModel registrationData = new RegistrationBodyModel(username, password);
+
+        SuccessfulRegistrationResponseModel registrationResponse = given(loginRequestSpec)
+                .body(registrationData)
+                .when()
+                .post("/users/register/")
+                .then()
+                .spec(SuccessfulRegistrationResponseSpec)
+                .extract()
+                .as(SuccessfulRegistrationResponseModel.class);
+
+        int userId = registrationResponse.id();
+        String remoteAddress = registrationResponse.remoteAddr();
+
+        LoginBodyModel loginData = new LoginBodyModel(username, password);
+
+        SuccessfulLoginResponseModel loginResponse = given(loginRequestSpec)
+                .body(loginData)
+                .when()
+                .post("/auth/token/")
+                .then()
+                .spec(successfulLoginResponseSpec)
+                .extract().as(SuccessfulLoginResponseModel.class);
+
+        String accessToken = "Bearer " + loginResponse.access();
+
+        OnlyFirstNamePatchUpdateBodyModel patchUpdateBody = new OnlyFirstNamePatchUpdateBodyModel(firstName);
+
+        SuccessfulPatchUpdateResponseModel patchUpdateResponse = given(loginRequestSpec)
+                .body(patchUpdateBody)
+                .header("Authorization", accessToken)
+                .when()
+                .patch("/users/me/")
+                .then()
+                .spec(successfulOneFieldPatchUserUpdateSpec)
+                .extract().as(SuccessfulPatchUpdateResponseModel.class);
+
+        int actualId = patchUpdateResponse.id();
+        String actualUsername = patchUpdateResponse.username();
+        String actualFirstName = patchUpdateResponse.firstName();
+        String actualLastName = patchUpdateResponse.lastName();
+        String actualEmail = patchUpdateResponse.email();
+        String actualAddr = patchUpdateResponse.remoteAddr();
+
+        assertThat(actualId).isEqualTo(userId);
+        assertThat(actualUsername).isEqualTo(username);
+        assertThat(actualFirstName).isEqualTo(firstName);
+        assertThat(actualLastName).isEqualTo("");
+        assertThat(actualEmail).isEqualTo("");
+        assertThat(actualAddr).isEqualTo(remoteAddress);
+
+    }
+
+    @Test
+    @DisplayName("Успешная замена только LastName методом PATCH")
+    public void onlyLastNameUpdatePatchTest() {
+        RegistrationBodyModel registrationData = new RegistrationBodyModel(username, password);
+
+        SuccessfulRegistrationResponseModel registrationResponse = given(loginRequestSpec)
+                .body(registrationData)
+                .when()
+                .post("/users/register/")
+                .then()
+                .spec(SuccessfulRegistrationResponseSpec)
+                .extract()
+                .as(SuccessfulRegistrationResponseModel.class);
+
+        int userId = registrationResponse.id();
+        String remoteAddress = registrationResponse.remoteAddr();
+
+        LoginBodyModel loginData = new LoginBodyModel(username, password);
+
+        SuccessfulLoginResponseModel loginResponse = given(loginRequestSpec)
+                .body(loginData)
+                .when()
+                .post("/auth/token/")
+                .then()
+                .spec(successfulLoginResponseSpec)
+                .extract().as(SuccessfulLoginResponseModel.class);
+
+        String accessToken = "Bearer " + loginResponse.access();
+
+        OnlyLastNamePatchUpdateBodyModel patchUpdateBody = new OnlyLastNamePatchUpdateBodyModel(lastName);
+
+        SuccessfulPatchUpdateResponseModel patchUpdateResponse = given(loginRequestSpec)
+                .body(patchUpdateBody)
+                .header("Authorization", accessToken)
+                .when()
+                .patch("/users/me/")
+                .then()
+                .spec(successfulOneFieldPatchUserUpdateSpec)
+                .extract().as(SuccessfulPatchUpdateResponseModel.class);
+
+        int actualId = patchUpdateResponse.id();
+        String actualUsername = patchUpdateResponse.username();
+        String actualFirstName = patchUpdateResponse.firstName();
+        String actualLastName = patchUpdateResponse.lastName();
+        String actualEmail = patchUpdateResponse.email();
+        String actualAddr = patchUpdateResponse.remoteAddr();
+
+        assertThat(actualId).isEqualTo(userId);
+        assertThat(actualUsername).isEqualTo(username);
+        assertThat(actualFirstName).isEqualTo("");
+        assertThat(actualLastName).isEqualTo(lastName);
+        assertThat(actualEmail).isEqualTo("");
+        assertThat(actualAddr).isEqualTo(remoteAddress);
+
+    }
+
+
+    @Test
+    @DisplayName("Успешная замена только Email методом PATCH")
+    public void onlyEmailUpdatePatchTest() {
+        RegistrationBodyModel registrationData = new RegistrationBodyModel(username, password);
+
+        SuccessfulRegistrationResponseModel registrationResponse = given(loginRequestSpec)
+                .body(registrationData)
+                .when()
+                .post("/users/register/")
+                .then()
+                .spec(SuccessfulRegistrationResponseSpec)
+                .extract()
+                .as(SuccessfulRegistrationResponseModel.class);
+
+        int userId = registrationResponse.id();
+        String remoteAddress = registrationResponse.remoteAddr();
+
+        LoginBodyModel loginData = new LoginBodyModel(username, password);
+
+        SuccessfulLoginResponseModel loginResponse = given(loginRequestSpec)
+                .body(loginData)
+                .when()
+                .post("/auth/token/")
+                .then()
+                .spec(successfulLoginResponseSpec)
+                .extract().as(SuccessfulLoginResponseModel.class);
+
+        String accessToken = "Bearer " + loginResponse.access();
+
+        OnlyEmailPatchUpdateBodyModel patchUpdateBody = new OnlyEmailPatchUpdateBodyModel(email);
+
+        SuccessfulPatchUpdateResponseModel patchUpdateResponse = given(loginRequestSpec)
+                .body(patchUpdateBody)
+                .header("Authorization", accessToken)
+                .when()
+                .patch("/users/me/")
+                .then()
+                .spec(successfulOneFieldPatchUserUpdateSpec)
+                .extract().as(SuccessfulPatchUpdateResponseModel.class);
+
+        int actualId = patchUpdateResponse.id();
+        String actualUsername = patchUpdateResponse.username();
+        String actualFirstName = patchUpdateResponse.firstName();
+        String actualLastName = patchUpdateResponse.lastName();
+        String actualEmail = patchUpdateResponse.email();
+        String actualAddr = patchUpdateResponse.remoteAddr();
+
+        assertThat(actualId).isEqualTo(userId);
+        assertThat(actualUsername).isEqualTo(username);
+        assertThat(actualFirstName).isEqualTo("");
+        assertThat(actualLastName).isEqualTo("");
+        assertThat(actualEmail).isEqualTo(email);
+        assertThat(actualAddr).isEqualTo(remoteAddress);
+
+    }
+
+    @Test
+    @DisplayName("Неуспешная замена всех полей методом PATCH - превышен лимит символов, нарушен формат")
+    public void exceedAndWrongFieldsUpdatePatchTest() {
+        RegistrationBodyModel registrationData = new RegistrationBodyModel(username, password);
+
+        SuccessfulRegistrationResponseModel registrationResponse = given(loginRequestSpec)
+                .body(registrationData)
+                .when()
+                .post("/users/register/")
+                .then()
+                .spec(SuccessfulRegistrationResponseSpec)
+                .extract()
+                .as(SuccessfulRegistrationResponseModel.class);
+
+        LoginBodyModel loginData = new LoginBodyModel(username, password);
+
+        SuccessfulLoginResponseModel loginResponse = given(loginRequestSpec)
+                .body(loginData)
+                .when()
+                .post("/auth/token/")
+                .then()
+                .spec(successfulLoginResponseSpec)
+                .extract().as(SuccessfulLoginResponseModel.class);
+
+        String accessToken = "Bearer " + loginResponse.access();
+
+        PatchUpdateBodyModel patchUpdateBody = new PatchUpdateBodyModel(forbiddenExceededUsername, forbiddenExceededUsername, forbiddenExceededUsername, forbiddenExceededEmail);
+
+        WrongFieldsPatchUpdateResponseModel patchUpdateResponse = given(loginRequestSpec)
+                .body(patchUpdateBody)
+                .header("Authorization", accessToken)
+                .when()
+                .patch("/users/me/")
+                .then()
+                .spec(wrongFieldsPatchUserUpdateSpec)
+                .extract().as(WrongFieldsPatchUpdateResponseModel.class);
+
+        String actualLengthUsernameError = patchUpdateResponse.username().get(0);
+        String actualFormatUsernameError = patchUpdateResponse.username().get(1);
+        String actualFirstNameError = patchUpdateResponse.firstName().get(0);
+        String actualLastNameError = patchUpdateResponse.lastName().get(0);
+        String actualAmountEmailError = patchUpdateResponse.email().get(0);
+        String actualFormatEmailError = patchUpdateResponse.email().get(1);
+        String expectedLengthUsernameError = "Enter a valid username. This value may contain only letters, numbers, and @/./+/-/_ characters.";
+        String expectedUsernameError = "Ensure this field has no more than 150 characters.";
+        String expectedFirstNameError = "Ensure this field has no more than 150 characters.";
+        String expectedLastNameError = "Ensure this field has no more than 150 characters.";
+        String expectedAmountEmailError = "Ensure this field has no more than 254 characters.";
+        String expectedFormatEmailError = "Enter a valid email address.";
+
+        assertThat(actualLengthUsernameError).isEqualTo(expectedLengthUsernameError);
+        assertThat(actualFormatUsernameError).isEqualTo(expectedUsernameError);
+        assertThat(actualFirstNameError).isEqualTo(expectedFirstNameError);
+        assertThat(actualLastNameError).isEqualTo(expectedLastNameError);
+        assertThat(actualAmountEmailError).isEqualTo(expectedAmountEmailError);
+        assertThat(actualFormatEmailError).isEqualTo(expectedFormatEmailError);
+
+    }
+
+    @Test
+    @DisplayName("Неуспешная замена всех полей методом PATCH - переданы пустые строки")
+    public void emptyFieldsUpdatePatchTest() {
+        RegistrationBodyModel registrationData = new RegistrationBodyModel(username, password);
+
+        SuccessfulRegistrationResponseModel registrationResponse = given(loginRequestSpec)
+                .body(registrationData)
+                .when()
+                .post("/users/register/")
+                .then()
+                .spec(SuccessfulRegistrationResponseSpec)
+                .extract()
+                .as(SuccessfulRegistrationResponseModel.class);
+
+        LoginBodyModel loginData = new LoginBodyModel(username, password);
+
+        SuccessfulLoginResponseModel loginResponse = given(loginRequestSpec)
+                .body(loginData)
+                .when()
+                .post("/auth/token/")
+                .then()
+                .spec(successfulLoginResponseSpec)
+                .extract().as(SuccessfulLoginResponseModel.class);
+
+        String accessToken = "Bearer " + loginResponse.access();
+
+        PatchUpdateBodyModel patchUpdateBody = new PatchUpdateBodyModel(emptyUsername, emptyFirstName, emptyLastName, emptyEmail);
+
+        WrongFieldsPatchUpdateResponseModel patchUpdateResponse = given(loginRequestSpec)
+                .body(patchUpdateBody)
+                .header("Authorization", accessToken)
+                .when()
+                .patch("/users/me/")
+                .then()
+                .spec(emptyFieldsPatchUserUpdateSpec)
+                .extract().as(WrongFieldsPatchUpdateResponseModel.class);
+
+        String actualUsernameError = patchUpdateResponse.username().get(0);
+        String expectedUsernameError = "This field may not be blank.";
+
+        assertThat(actualUsernameError).isEqualTo(expectedUsernameError);
+
+
+    }
+
+    @Test
+    @DisplayName("Неуспешная замена всех полей методом PATCH - не переданы поля")
+    public void wrongNoFieldsUpdatePatchTest() {
+        RegistrationBodyModel registrationData = new RegistrationBodyModel(username, password);
+
+        SuccessfulRegistrationResponseModel registrationResponse = given(loginRequestSpec)
+                .body(registrationData)
+                .when()
+                .post("/users/register/")
+                .then()
+                .spec(SuccessfulRegistrationResponseSpec)
+                .extract()
+                .as(SuccessfulRegistrationResponseModel.class);
+
+        int userId = registrationResponse.id();
+        String remoteAddress = registrationResponse.remoteAddr();
+
+        LoginBodyModel loginData = new LoginBodyModel(username, password);
+
+        SuccessfulLoginResponseModel loginResponse = given(loginRequestSpec)
+                .body(loginData)
+                .when()
+                .post("/auth/token/")
+                .then()
+                .spec(successfulLoginResponseSpec)
+                .extract().as(SuccessfulLoginResponseModel.class);
+
+        String accessToken = "Bearer " + loginResponse.access();
+
+        EmptyPatchUpdateBodyModel patchUpdateBody = new EmptyPatchUpdateBodyModel();
+
+        SuccessfulPatchUpdateResponseModel patchUpdateResponse = given(loginRequestSpec)
+                .body(patchUpdateBody)
+                .header("Authorization", accessToken)
+                .when()
+                .patch("/users/me/")
+                .then()
+                .spec(noFieldsPatchUserUpdateSpec)
+                .extract().as(SuccessfulPatchUpdateResponseModel.class);
+
+        int actualId = patchUpdateResponse.id();
+        String actualUsername = patchUpdateResponse.username();
+        String actualFirstName = patchUpdateResponse.firstName();
+        String actualLastName = patchUpdateResponse.lastName();
+        String actualEmail = patchUpdateResponse.email();
+        String actualAddr = patchUpdateResponse.remoteAddr();
+
+        assertThat(actualId).isEqualTo(userId);
+        assertThat(actualUsername).isEqualTo(username);
+        assertThat(actualFirstName).isEqualTo("");
+        assertThat(actualLastName).isEqualTo("");
+        assertThat(actualEmail).isEqualTo("");
+        assertThat(actualAddr).isEqualTo(remoteAddress);
+
+    }
+
+
+}
+
